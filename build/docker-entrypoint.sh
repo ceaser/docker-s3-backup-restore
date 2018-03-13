@@ -151,42 +151,34 @@ doBackup() {
 
   # The first braces expand to $V and the coln if V is set already otherwise do nothing
   local src=${LOCAL/+${LOCAL}/}
-  local dateStamp=$(date -u +%Y%m%d%H%M%S)
+  local dst=${REMOTE/+${REMOTE}/}
+
+  local dateStamp=$(date -u +%Y%m%d%H%M%S/)
   local stateFile="$src/.backup-last"
 
-  #	# The first braces expand to $V and the coln if V is set already otherwise do nothing
-  local dst=${REMOTE/+${REMOTE}/}$dateStamp/
+  local latest=$(aws s3 ls "$dst" | awk '{ print $2 }' | tail -n1)
 
-  # TODO: Remove the local state file. Just ls the previous backups. Then copy the latest
-  if [ -f "$stateFile" ]
+  if [ ! -z "$latest" ]
   then
-    local lastDateStamp=$(cat $stateFile)
-    # The first braces expand to $V and the coln if V is set already otherwise do nothing
-    local src=${REMOTE/+${REMOTE}/}$lastDateStamp/
-
+    # TODO: Remove the loop on cp
     set +e
     while true
     do
-      aws s3 cp $EXTRA --recursive "$src" "$dst"
+      aws s3 cp $EXTRA --recursive "$REMOTE$latest" "$dst$dateStamp"
       if [ "$?" == "0" ]; then break; fi
       sleep 1
     done
     set -e
   fi
 
-  # The first braces expand to $V and the coln if V is set already otherwise do nothing
-  local src=${LOCAL/+${LOCAL}/}
-
   set +e
   while true
   do
-    aws s3 sync $EXTRA --delete "$src" "$dst"
+    aws s3 sync $EXTRA --delete "$src" "$dst$dateStamp"
     if [ "$?" == "0" ]; then break; fi
     sleep 1
   done
   set -e
-
-  echo "$dateStamp" > "$stateFile"
 }
 
 doRestore() {
@@ -198,18 +190,17 @@ doRestore() {
 	# Input: None
 	# Output: None
 
+  local src=${REMOTE/+${REMOTE}/}
   local dst=${LOCAL/+${LOCAL}/}
   if [ ! -d "$dst" ]; then echo "\local: \"$dst\" doesn't exist or isn't a directory" >&2; exit 1; fi
 
-  local stateFile="$src/.backup-last"
-
   if [ ! -z "$TIMESTAMP" ]
 	then
-    local src=${REMOTE/+${REMOTE}/}$TIMESTAMP/
+    local TIMESTAMP=${TIMESTAMP/+${TIMESTAMP}/}
+    local src=$src$TIMESTAMP
 	else
-    local src=${REMOTE/+${REMOTE}/}
     local latest=$(aws s3 ls "$src" | awk '{ print $2 }' | tail -n1)
-    local src=${REMOTE/+${REMOTE}/}$latest
+    local src=$src$latest
   fi
 
   set +e
