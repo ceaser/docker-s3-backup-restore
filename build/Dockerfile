@@ -11,15 +11,15 @@ RUN [ -z "$DEB_PROXY" ] || \
   echo "Acquire::https::Proxy false;" >> /etc/apt/apt.conf.d/01proxy
 
 RUN set -ex \
-	# Install dependencies.
-	&& apt-get update \
+  # Install dependencies.
+  && apt-get update \
   && apt-get install -y \
     awscli \
     ca-certificates \
 
-	# cleanup
-	&& apt-get purge -y unzip apt-transport-https wget \
-	&& apt-get clean \
+  # cleanup
+  && apt-get purge -y unzip apt-transport-https wget \
+  && apt-get clean \
   && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /etc/apt/apt.conf.d/01proxy
 
 # Copy entrypoint script.
