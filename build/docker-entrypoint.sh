@@ -160,15 +160,7 @@ doBackup() {
 
   if [ ! -z "$latest" ]
   then
-    # TODO: Remove the loop on cp
-    set +e
-    while true
-    do
-      aws s3 cp $EXTRA --recursive "$REMOTE$latest" "$dst$dateStamp"
-      if [ "$?" == "0" ]; then break; fi
-      sleep 1
-    done
-    set -e
+    aws s3 cp $EXTRA --recursive "$REMOTE$latest" "$dst$dateStamp"
   fi
 
   set +e
