@@ -4,8 +4,6 @@ A utility docker image to backup or restore another container's data to s3.
 ## Usage
 The container is designed to use arguments configure the container.
 
-The only other configuration is the generated backup.yml file. The backup.yml file is used to specify the path and which aws-cli options the container should use.
-
 The script values backup speed/time and low cpu utilization over s3 space usage. The strategy is to sync the data instead performing a full backup every time. The files are copied as is to S3 to a date and time stamp folder. if a previous backup exist it's copied remotely before the local copy is synced.
 
 ```
