@@ -24,30 +24,46 @@ Options:
                 AWS Secret Key
 
     --mode <string>
-                init - create the empty configuration file in the /data/backup.json path
                 restore - reads the /data/backup.yml file and executes a restore
                 backup - reads the /data/backup.yml file and executes a save
 
+    --local <string>
+                Path to the local directory to backup.
+                Default: /data/
+
+    --remote <string>
+                S3 bucket and path to use. Must start with the s3:// prefix.
+
+    --owner <string>
+                The owner name or id to change restored files to.
+                Default: 1000
+
+    --group <string>
+                The group  name or id to change restored files to.
+                Default: 1000
+
     --timestamp <string>
                 When performing a restore. Specify a timestamp to restore
+
+    -- <string>
+                Additional arguments to pass to the AWS cli. Common use cases are --include, --exclude and --storage-class
+
 ```
 
 ## Examples
 
 Get help
 ```SHELL
-docker run -it --rm --volumes-from <other container id/name with the data> ceaser/s3-backup-restore
+docker run --rm ceaser/s3-backup-restore
 ```
-Create a empty backup.yml file. In the /data directory
-```SHELL
-docker run -it --rm --volumes-from <other container id/name with the data> ceaser/s3-backup-restore --mode init --config /data/backup.yml
-```
+
 How to Backup. Security credentials are omitted.
 ```SHELL
-docker run -it --rm --volumes-from <other container id/name with the data> ceaser/s3-backup-restore --mode backup
+docker run -it --rm --volumes-from <other container id/name with the data> ceaser/s3-backup-restore --mode backup --remote s3://bucket/path
 ```
+
 How to Restore. Security credentials are omitted.
 ```SHELL
-docker run -it --rm --volumes-from <other container id/name with the data> ceaser/s3-backup-restore --mode restore
+docker run -it --rm --volumes-from <other container id/name with the data> ceaser/s3-backup-restore --mode restore --remote s3://bucket/path
 ```
 

@@ -12,6 +12,11 @@ ACCESS_KEY_ID=
 SECRET_KEY=
 MODE=
 TIMESTAMP=
+LOCAL=/data/
+REMOTE=
+OWNER=1000
+GROUP=1000
+EXTRA=
 
 usage(){
 (
@@ -33,12 +38,29 @@ Options:
     		AWS Secret Key
 
     --mode <string>
-    		init - create the empty configuration file in the /data/backup.json path
     		restore - reads the $CONFIG file and executes a restore
     		backup - reads the $CONFIG file and executes a save
 
+    --local <string>
+    		Path to the local directory to backup.
+    		Default: $LOCAL
+
+    --remote <string>
+    		S3 bucket and path to use. Must start with the s3:// prefix.
+
+    --owner <string>
+    		The owner name or id to change restored files to.
+    		Default: $OWNER
+
+    --group <string>
+    		The group  name or id to change restored files to.
+    		Default: $GROUP
+
     --timestamp <string>
     		When performing a restore. Specify a timestamp to restore
+
+    -- <string>
+    		Additional arguments to pass to the AWS cli. Common use cases are --include, --exclude and --storage-class
 EOL
 ) >&2
 }
@@ -52,7 +74,7 @@ parseOptions() {
 	# Parses command arguments and assigns values to global variables
 	# Input: parseOptions $@ - pass in the options used on the main script
 	# Output: None
-	TEMP=`getopt  -o h: --longoptions config:,region:,access-key:,secret-key:,timestamp:,mode: -n 'docker-entrypoint.sh' -- "$@"`
+	TEMP=`getopt  -o h: --longoptions config:,region:,access-key:,secret-key:,timestamp:,local:,remote:,owner:,group:,mode: -n 'docker-entrypoint.sh' -- "$@"`
 
 	if [ $? != 0 ] ; then usage; exit 1 ; fi
 
@@ -67,7 +89,11 @@ parseOptions() {
 			--secret-key ) SECRET_KEY="$2"; shift 2;;
 			--timestamp ) TIMESTAMP="$2"; shift 2;;
 			--mode ) MODE="$2"; shift 2;;
-			-- ) shift; break ;;
+			--local ) LOCAL=$2; shift 2;;
+			--remote ) REMOTE="$2"; shift 2;;
+			--owner) OWNER="$2"; shift 2;;
+			--group ) GROUP="$2"; shift 2;;
+			-- ) shift; EXTRA="$@"; break ;;
 			* ) usage; break ;;
 		esac
 	done
@@ -83,26 +109,10 @@ validateOptions() {
  	if [ -z "$ACCESS_KEY_ID" ]; then echo "--aws-access-key-id missing" >&2; usage; exit 1; fi
  	if [ -z "$SECRET_KEY" ]; then echo "--aws-secret-key missing" >&2; usage; exit 1; fi
 	if [ -z "$MODE" ]; then echo "--mode missing" >&2; usage; exit 1; fi
-}
-
-
-parseYaml() {
-	# Checks if global variables are set
-	# Input: parseYaml <path-to-file> <prefix> - path is a yaml file and prefix is for the env variable
-	# Output: None
-   local prefix=$2
-   local s='[[:space:]]*' w='[a-zA-Z0-9_]*' fs=$(echo @|tr @ '\034')
-   sed -ne "s|^\($s\)\($w\)$s:$s\"\(.*\)\"$s\$|\1$fs\2$fs\3|p" \
-        -e "s|^\($s\)\($w\)$s:$s\(.*\)$s\$|\1$fs\2$fs\3|p"  $1 |
-   awk -F$fs '{
-      indent = length($1)/2;
-      vname[indent] = $2;
-      for (i in vname) {if (i > indent) {delete vname[i]}}
-      if (length($3) > 0) {
-         vn=""; for (i=0; i<indent; i++) {vn=(vn)(vname[i])("_")}
-         printf("%s%s%s=\"%s\"\n", "'$prefix'",vn, $2, $3);
-      }
-   }'
+	if [ -z "$LOCAL" ]; then echo "--local missing" >&2; usage; exit 1; fi
+	if [ -z "$REMOTE" ]; then echo "--remote missing" >&2; usage; exit 1; fi
+	if [ -z "$OWNER" ]; then echo "--owner missing" >&2; usage; exit 1; fi
+	if [ -z "$GROUP" ]; then echo "--group missing" >&2; usage; exit 1; fi
 }
 
 configureAWS() {
@@ -129,25 +139,6 @@ EOP
 		chmod 600 /root/.aws/credentials
 }
 
-doInit() {
-	# Creates the configuration file if it doesn't exist
-	# Input: None
-	# Output: None
-
-	if [ ! -f "$CONFIG" ]
-	then
-( cat <<EOL
-default:
-	local: /data/
-	remote: s3://replace-bucket/replace-path/
-	owner: 1000
-	group: 1000
-	extra: "--dry-run"
-EOL
-) > $CONFIG
-fi
-}
-
 doBackup() {
 	# Performs a backup.
   # Reads the backup.yml file from the CONFIG variables.
@@ -156,29 +147,27 @@ doBackup() {
 	# Input: None
 	# Output: None
 
-  eval $(parseYaml $CONFIG "config_")
-
-  if [ ! -d "$config_default_local" ]; then echo "\$local: \"$config_default_local\" doesn't exist or isn't a directory" >&2; exit 1; fi
+  if [ ! -d "$LOCAL" ]; then echo "\$local: \"$LOCAL\" doesn't exist or isn't a directory" >&2; exit 1; fi
 
   # The first braces expand to $V and the coln if V is set already otherwise do nothing
-  local src=${config_default_local/+${config_default_local}/}
+  local src=${LOCAL/+${LOCAL}/}
   local dateStamp=$(date -u +%Y%m%d%H%M%S)
   local stateFile="$src/.backup-last"
 
   #	# The first braces expand to $V and the coln if V is set already otherwise do nothing
-  local dst=${config_default_remote/+${config_default_remote}/}$dateStamp/
+  local dst=${REMOTE/+${REMOTE}/}$dateStamp/
 
   # TODO: Remove the local state file. Just ls the previous backups. Then copy the latest
   if [ -f "$stateFile" ]
   then
     local lastDateStamp=$(cat $stateFile)
     # The first braces expand to $V and the coln if V is set already otherwise do nothing
-    local src=${config_default_remote/+${config_default_remote}/}$lastDateStamp/
+    local src=${REMOTE/+${REMOTE}/}$lastDateStamp/
 
     set +e
     while true
     do
-      aws s3 cp $config_default_extra --recursive "$src" "$dst"
+      aws s3 cp $EXTRA --recursive "$src" "$dst"
       if [ "$?" == "0" ]; then break; fi
       sleep 1
     done
@@ -186,12 +175,12 @@ doBackup() {
   fi
 
   # The first braces expand to $V and the coln if V is set already otherwise do nothing
-  local src=${config_default_local/+${config_default_local}/}
+  local src=${LOCAL/+${LOCAL}/}
 
   set +e
   while true
   do
-    aws s3 sync $config_default_extra --delete "$src" "$dst"
+    aws s3 sync $EXTRA --delete "$src" "$dst"
     if [ "$?" == "0" ]; then break; fi
     sleep 1
   done
@@ -208,33 +197,32 @@ doRestore() {
   # Changes the owner and group of files restored
 	# Input: None
 	# Output: None
-	eval $(parseYaml $CONFIG "config_")
 
-  local dst=${config_default_local/+${config_default_local}/}
+  local dst=${LOCAL/+${LOCAL}/}
   if [ ! -d "$dst" ]; then echo "\local: \"$dst\" doesn't exist or isn't a directory" >&2; exit 1; fi
 
   local stateFile="$src/.backup-last"
 
   if [ ! -z "$TIMESTAMP" ]
 	then
-    local src=${config_default_remote/+${config_default_remote}/}$TIMESTAMP/
+    local src=${REMOTE/+${REMOTE}/}$TIMESTAMP/
 	else
-    local src=${config_default_remote/+${config_default_remote}/}
+    local src=${REMOTE/+${REMOTE}/}
     local latest=$(aws s3 ls "$src" | awk '{ print $2 }' | tail -n1)
-    local src=${config_default_remote/+${config_default_remote}/}$latest
+    local src=${REMOTE/+${REMOTE}/}$latest
   fi
 
   set +e
   while true
   do
-    aws s3 sync $config_default_extra "$src" "$dst"
+    aws s3 sync $EXTRA "$src" "$dst"
     if [ "$?" == "0" ]; then break; fi
     sleep 1
   done
   set -e
 
-  if [ ! -z "$config_default_owner" ]; then chown -R "$config_default_owner" $dst; fi
-  if [ ! -z "$config_default_group" ]; then chgrp -R "$config_default_group" $dst; fi
+  if [ ! -z "$OWNER" ]; then chown -R "$OWNER" $dst; fi
+  if [ ! -z "$GROUP" ]; then chgrp -R "$GROUP" $dst; fi
 }
 
 ################################################################################
@@ -244,10 +232,6 @@ parseOptions "$@"
 validateOptions
 
 case "$MODE" in
-	init )
-		doInit
-    exit 0
-		;;
 	backup )
 		configureAWS
 		doBackup
