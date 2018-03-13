@@ -17,6 +17,8 @@ REMOTE=
 OWNER=1000
 GROUP=1000
 EXTRA=
+KEEP=5
+NOCLEANUP=
 
 usage(){
 (
@@ -59,6 +61,12 @@ Options:
     --timestamp <string>
     		When performing a restore. Specify a timestamp to restore
 
+    --keep <int>
+    		The number of recent backups to keep.
+
+    --no-cleanup
+    		Disable cleanup.
+
     -- <string>
     		Additional arguments to pass to the AWS cli. Common use cases are --include, --exclude and --storage-class
 EOL
@@ -74,7 +82,7 @@ parseOptions() {
 	# Parses command arguments and assigns values to global variables
 	# Input: parseOptions $@ - pass in the options used on the main script
 	# Output: None
-	TEMP=`getopt  -o h: --longoptions config:,region:,access-key:,secret-key:,timestamp:,local:,remote:,owner:,group:,mode: -n 'docker-entrypoint.sh' -- "$@"`
+	TEMP=`getopt  -o h: --longoptions config:,region:,access-key:,secret-key:,timestamp:,local:,remote:,owner:,group:,keep:,no-cleanup,mode: -n 'docker-entrypoint.sh' -- "$@"`
 
 	if [ $? != 0 ] ; then usage; exit 1 ; fi
 
@@ -93,6 +101,8 @@ parseOptions() {
 			--remote ) REMOTE="$2"; shift 2;;
 			--owner) OWNER="$2"; shift 2;;
 			--group ) GROUP="$2"; shift 2;;
+			--keep ) KEEP="$2"; shift 2;;
+			--no-cleanup ) NOCLEANUP="true"; shift 1;;
 			-- ) shift; EXTRA="$@"; break ;;
 			* ) usage; break ;;
 		esac
@@ -113,6 +123,7 @@ validateOptions() {
 	if [ -z "$REMOTE" ]; then echo "--remote missing" >&2; usage; exit 1; fi
 	if [ -z "$OWNER" ]; then echo "--owner missing" >&2; usage; exit 1; fi
 	if [ -z "$GROUP" ]; then echo "--group missing" >&2; usage; exit 1; fi
+	if [ -z "$KEEP" ]; then echo "--keep missing" >&2; usage; exit 1; fi
 }
 
 configureAWS() {
@@ -208,25 +219,47 @@ doRestore() {
   if [ ! -z "$GROUP" ]; then chgrp -R "$GROUP" $dst; fi
 }
 
+doCleanup() {
+	# If cleanup is not disabled. This function will KEEP X number of the latest backups.
+  # It removes the reset.
+	# Input: None
+	# Output: None
+
+  if [ ! -z "$NOCLEANUP" ]; then return; fi
+
+  local src=${REMOTE/+${REMOTE}/}
+  local backups=$(aws s3 ls "$src" | awk '{ print $2 }')
+  local count=$(echo "$backups" | wc -l)
+  if [ "$count" -lt "$KEEP" ] || [ "$count" -eq "$KEEP" ] ; then return; fi
+
+  local removeCount=$(( $count - $KEEP ))
+  local backups=$(echo "$backups" | head -n $removeCount)
+
+  for backup in `echo $backups`
+  do
+   aws s3 rm "$src$backup" --recursive
+  done
+}
+
 ################################################################################
 # Execute the script
 ################################################################################
 parseOptions "$@"
 validateOptions
+configureAWS
 
 case "$MODE" in
 	backup )
-		configureAWS
 		doBackup
-    exit 0
 		;;
 	restore )
-		configureAWS
-		doRestore
-    exit 0
+    doRestore
 		;;
 	* )
 		usage
 		exit 1
 		;;
 esac
+
+doCleanup
+
